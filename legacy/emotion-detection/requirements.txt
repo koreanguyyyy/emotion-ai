@@ -1,0 +1,8 @@
+deepface
+opencv-python
+whisper
+librosa
+sounddevice
+numpy
+requests
+python-dotenv
