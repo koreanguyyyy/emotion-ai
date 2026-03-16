@@ -1,0 +1,11 @@
+.env
+.gradle/
+build/
+*.class
+*.jar
+*.war
+.idea/
+*.iml
+out/
+.DS_Store
+application-local.yml
