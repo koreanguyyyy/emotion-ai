@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SAMPLE_RATE = 16000
-TEMP_PATH = "temp_audio.wav"
+TEMP_PATH = "audio/temp_audio.wav"
 
 # .env에서 방법 선택
 # STT_MODE=fixed   → 고정 길이 녹음 (방법 2)
