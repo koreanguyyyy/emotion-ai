@@ -1,12 +1,19 @@
 # main.py
 import threading
 import time
+import os
+
 from state.emotion_state import get_state, update_state, stop_event
 from detection.face_detector import run_face_detection
 from detection.stt_detector import run_stt
 from ai.stress_calculator import should_call_llm, get_recent_stt
-from llm_client import request_llm
-from emotion_agent import is_cooldown_active, update_intervention_time, get_remaining_cooldown
+from ai.llm_client import request_llm
+from ai.cooldown import is_cooldown_active, update_intervention_time, get_remaining_cooldown
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DETECTION_INTERVAL = int(os.getenv("DETECTION_INTERVAL", 5))  # 감지 간격 (초) - 환경변수로 조정 가능
 
 def run_stress_calculator():
     print("[Stress] 스트레스 계산 시작...")
