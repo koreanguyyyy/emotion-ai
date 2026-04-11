@@ -15,7 +15,7 @@ def request_llm(
     - None → 서버 오류 시
     """
     payload = {
-        "vad_stress": vad_stress,
+        "vad_stress": float(vad_stress),
         "stt_text": stt_text,
         "face_emotion": face_emotion,
     }

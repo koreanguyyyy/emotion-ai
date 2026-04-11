@@ -4,7 +4,7 @@ import soundfile as sf
 import whisper
 import os
 from state.emotion_state import update_state, stop_event
-from ..ai.stress_calculator import add_stt_text
+from ai.stress_calculator import add_stt_text
 
 SAMPLE_RATE = 16000
 DURATION = 5
