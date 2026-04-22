@@ -1,8 +1,13 @@
 # agent/nodes.py
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.messages import HumanMessage
 from llm.model import llm
 from agent.state import AgentState
+from tools import ALL_TOOLS
+
+# ── LLM에 Tool 바인딩 ──────────────────────────────────
+llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
 # ── 스트레스 보정 프롬프트 ─────────────────────────────
 stress_prompt = ChatPromptTemplate.from_messages([
@@ -17,14 +22,7 @@ VAD 기반 스트레스 점수: {vad_stress}/10
 최종 스트레스 수준 (0~10):""")
 ])
 
-# ── 추천 프롬프트 ──────────────────────────────────────
-recommend_prompt = ChatPromptTemplate.from_messages([
-    ("system", "당신은 감정 케어 전문가입니다. 한국어로 답변하세요."),
-    ("human", "사용자의 현재 감정은 '{emotion}'이고 스트레스 수준은 {stress_level}/10입니다. 위로와 함께 구체적인 활동을 추천해주세요.")
-])
-
 stress_chain = stress_prompt | llm | StrOutputParser()
-recommend_chain = recommend_prompt | llm | StrOutputParser()
 
 # ── 노드 1: 스트레스 보정 ──────────────────────────────
 def correct_stress(state: AgentState) -> AgentState:
@@ -56,15 +54,48 @@ def decide_intervention(state: AgentState) -> AgentState:
     print(f"[Node] 판단: {state['recommendation']} (스트레스: {state['stress_level']}/10)")
     return state
 
-# ── 노드 3: 추천 생성 ──────────────────────────────────
+# ── 노드 3: Tool Calling 추천 ──────────────────────────
 def recommend(state: AgentState) -> AgentState:
-    print("[Node] 추천 생성 중...")
-    response = recommend_chain.invoke({
-        "emotion": state["face_emotion"],
-        "stress_level": state["stress_level"]
-    })
-    state["recommendation"] = response
-    print(f"[Node] 추천 완료")
+    print("[Node] Tool Calling 추천 시작...")
+
+    prompt = f"""
+사용자의 현재 상태:
+- 감정: {state['face_emotion']}
+- 스트레스 수준: {state['stress_level']}/10
+- 최근 발화: "{state['stt_text']}"
+
+위 상태를 분석해서 사용자에게 가장 도움이 될 것 같은 추천을 해주세요.
+반드시 아래 도구 중 하나 또는 여러 개를 호출해서 구체적인 추천 결과를 제공하세요:
+- recommend_music: 감정에 맞는 음악 추천
+- recommend_book: 감정에 맞는 책 추천
+- recommend_place: 주변 장소 추천
+"""
+
+    try:
+        response = llm_with_tools.invoke([HumanMessage(content=prompt)])
+
+        tool_results = []
+        if response.tool_calls:
+            tool_map = {t.name: t for t in ALL_TOOLS}
+            for tool_call in response.tool_calls:
+                tool_name = tool_call["name"]
+                tool_args = tool_call["args"]
+                print(f"[Node] Tool 호출: {tool_name}({tool_args})")
+
+                if tool_name in tool_map:
+                    result = tool_map[tool_name].invoke(tool_args)
+                    tool_results.append(result)
+
+            state["recommendation"] = "\n\n".join(tool_results)
+        else:
+            state["recommendation"] = str(response.content)
+
+        print("[Node] 추천 완료")
+
+    except Exception as e:
+        print(f"[Node] Tool Calling 실패: {e}")
+        state["recommendation"] = "추천을 생성하지 못했습니다."
+
     return state
 
 # ── 조건부 엣지 ────────────────────────────────────────
