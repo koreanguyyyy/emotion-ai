@@ -34,7 +34,8 @@ def correct_stress(state: AgentState) -> AgentState:
     try:
         result = stress_chain.invoke({
             "vad_stress": state["vad_stress"],
-            "stt_text": state["stt_text"]
+            "stt_text": state["stt_text"],
+            "face_emotion": state["face_emotion"]
         })
         stress = int("".join(filter(str.isdigit, result.strip()))[:1])
         state["stress_level"] = max(0, min(10, stress))
@@ -55,40 +56,60 @@ def decide_intervention(state: AgentState) -> AgentState:
     return state
 
 # ── 노드 3: Tool Calling 추천 ──────────────────────────
+# agent/nodes.py - recommend 노드만 수정
 def recommend(state: AgentState) -> AgentState:
     print("[Node] Tool Calling 추천 시작...")
 
-    prompt = f"""
-사용자의 현재 상태:
-- 감정: {state['face_emotion']}
-- 스트레스 수준: {state['stress_level']}/10
-- 최근 발화: "{state['stt_text']}"
+    prompt = f""" 
+    사용자의 현재 상태:
+    - 감정: {state['face_emotion']}
+    - 스트레스 수준: {state['stress_level']}/10
+    - 최근 발화: "{state['stt_text']}"
 
-위 상태를 분석해서 사용자에게 가장 도움이 될 것 같은 추천을 해주세요.
-반드시 아래 도구 중 하나 또는 여러 개를 호출해서 구체적인 추천 결과를 제공하세요:
-- recommend_music: 감정에 맞는 음악 추천
-- recommend_book: 감정에 맞는 책 추천
-- recommend_place: 주변 장소 추천
-"""
+    [Tool 선택 규칙]
+    1. 발화에서 사용자가 **구체적으로 요청한 대상**을 최우선으로 판단하세요:
+    - "노래", "음악", "들을", "듣고 싶다" → recommend_music 호출
+    - "책", "읽을", "읽고 싶다" → recommend_book 호출
+    - "장소", "어디", "카페", "공원", "산책" → recommend_place 호출
 
+    ⚠️ "풀다", "해소", "전환" 같은 동사는 Tool 선택 기준이 아닙니다.
+    "기분을 풀 수 있는 노래" → "노래"가 핵심이므로 recommend_music입니다.
+
+    2. 발화에 위 키워드가 전혀 없을 때만 감정 기반으로 선택하세요:
+    - 슬픔/공포/혐오 → recommend_music
+    - 분노 → recommend_place
+    - 무감정 → recommend_book
+    - 행복/놀람 → 자유롭게 선택
+
+    반드시 Tool을 호출하세요. 분석 과정을 텍스트로 설명하지 말고, Tool function을 직접 호출하세요.
+    """
     try:
         response = llm_with_tools.invoke([HumanMessage(content=prompt)])
+
 
         tool_results = []
         if response.tool_calls:
             tool_map = {t.name: t for t in ALL_TOOLS}
+            print(tool_map)
+            
             for tool_call in response.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
+                
+                
+                
                 print(f"[Node] Tool 호출: {tool_name}({tool_args})")
+                print("----------------------------------------------")
 
                 if tool_name in tool_map:
                     result = tool_map[tool_name].invoke(tool_args)
                     tool_results.append(result)
 
             state["recommendation"] = "\n\n".join(tool_results)
+            print(f"[Node] Tool 결과:\n{state['recommendation']}")
         else:
-            state["recommendation"] = str(response.content)
+            print("[Node] Tool 호출 없음 → LLM이 텍스트로만 응답")
+            state["recommendation"] = "추천을 생성하지 못했습니다. 다시 시도해주세요."
 
         print("[Node] 추천 완료")
 
@@ -97,7 +118,6 @@ def recommend(state: AgentState) -> AgentState:
         state["recommendation"] = "추천을 생성하지 못했습니다."
 
     return state
-
 # ── 조건부 엣지 ────────────────────────────────────────
 def should_recommend(state: AgentState) -> str:
     if state["recommendation"] == "개입 불필요":
