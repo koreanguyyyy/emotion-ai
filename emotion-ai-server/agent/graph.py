@@ -2,6 +2,7 @@
 from langgraph.graph import StateGraph, END
 from agent.state import AgentState
 from agent.nodes import correct_stress, decide_intervention, recommend, should_recommend
+from backend_client import save_intervention, save_recommendations
 
 def build_graph():
     graph = StateGraph(AgentState)
@@ -24,7 +25,14 @@ def build_graph():
 # 전역 앱 인스턴스
 app = build_graph()
 
-def run_agent(vad_stress: float, stt_text: str, face_emotion: str) -> dict:
+def run_agent(
+    vad_stress: float,
+    stt_text: str,
+    face_emotion: str,
+    user_id: int,
+    emotion_log_id: int,
+    cooldown_minutes: int = 30,
+) -> dict:
     result = app.invoke({
         "vad_stress": vad_stress,
         "stt_text": stt_text,
@@ -32,8 +40,33 @@ def run_agent(vad_stress: float, stt_text: str, face_emotion: str) -> dict:
         "stress_level": 0,
         "recommendation": ""
     })
+
+    recommendation = result["recommendation"]
+    stress_level = result["stress_level"]
+
+    # 개입 불필요면 DB 저장 안 함
+    if recommendation == "개입 불필요" or not recommendation:
+        return {
+            "stress_level": stress_level,
+            "recommendation": None
+        }
+
+    # 개입 저장
+    intervention_id = save_intervention(
+        user_id=user_id,
+        emotion_log_id=emotion_log_id,
+        agent_message=recommendation,
+        cooldown_minutes=cooldown_minutes,
+    )
+
+    # 추천 항목 저장
+    if intervention_id:
+        save_recommendations(
+            intervention_id=intervention_id,
+            recommendation_text=recommendation,
+        )
+
     return {
-        "stress_level": result["stress_level"],
-        "recommendation": result["recommendation"]
-        if result["recommendation"] != "개입 불필요" else None
+        "stress_level": stress_level,
+        "recommendation": recommendation
     }

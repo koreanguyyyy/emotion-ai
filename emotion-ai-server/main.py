@@ -9,6 +9,9 @@ class AnalyzeRequest(BaseModel):
     vad_stress: float
     stt_text: str
     face_emotion: str
+    user_id: int
+    emotion_log_id: int
+    cooldown_minutes: int = 30
 
 class AnalyzeResponse(BaseModel):
     stress_level: int
@@ -20,6 +23,9 @@ async def analyze(req: AnalyzeRequest):
         vad_stress=req.vad_stress,
         stt_text=req.stt_text,
         face_emotion=req.face_emotion,
+        user_id=req.user_id,
+        emotion_log_id=req.emotion_log_id,
+        cooldown_minutes=req.cooldown_minutes,
     )
     return result
 
