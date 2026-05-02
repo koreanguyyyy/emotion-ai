@@ -12,6 +12,7 @@ from backend.api_client import check_cooldown, save_emotion_log, save_interventi
 
 load_dotenv()
 DETECTION_INTERVAL = int(os.getenv("DETECTION_INTERVAL", 5))
+USER_ID = int(os.getenv("USER_ID", 1))
 
 def run_stress_calculator():
     print("[Stress] 스트레스 계산 시작...")
@@ -43,8 +44,8 @@ def run_stress_calculator():
             face_confidence=max(emotion_scores.values()),
             speech_text=stt_text,
             vad_stress_score=vad_stress,
-            final_stress_level=None,         # LLM 보정 후 업데이트
-            intervention_triggered=False,    # 개입 확정 후 업데이트
+            final_stress_level=None,
+            intervention_triggered=False,
         )
 
         # 4단계: AI 서버로 LLM 요청
@@ -52,6 +53,8 @@ def run_stress_calculator():
             vad_stress=vad_stress,
             stt_text=stt_text,
             face_emotion=face_emotion,
+            user_id=USER_ID,
+            emotion_log_id=emotion_log_id or 0,
         )
 
         # 서버 오류 시 VAD 값으로 fallback
@@ -64,15 +67,9 @@ def run_stress_calculator():
 
         update_state(stress_level=stress_level)
 
-        # 5단계: 개입 발생 시 DB 저장
-        if recommendation and emotion_log_id:
+        # 5단계: 개입 발생 시 DB 저장 (capstone-ai에서 처리하므로 detection은 로그만)
+        if recommendation:
             print(f"\n[추천 결과]\n{recommendation}\n")
-            cooldown_minutes = int(os.getenv("COOLDOWN_MINUTES", 30))
-            save_intervention(
-                emotion_log_id=emotion_log_id,
-                agent_message=recommendation,
-                cooldown_minutes=cooldown_minutes,
-            )
 
 def print_state():
     while not stop_event.is_set():
