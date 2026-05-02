@@ -2,26 +2,25 @@
 import threading
 import time
 import os
-
+from dotenv import load_dotenv
 from state.emotion_state import get_state, update_state, stop_event
 from detection.face_detector import run_face_detection
 from detection.stt_detector import run_stt
 from ai.stress_calculator import should_call_llm, get_recent_stt
 from ai.llm_client import request_llm
-from ai.cooldown import is_cooldown_active, update_intervention_time, get_remaining_cooldown
-from dotenv import load_dotenv
+from backend.api_client import check_cooldown, save_emotion_log, save_intervention
 
 load_dotenv()
-
-DETECTION_INTERVAL = int(os.getenv("DETECTION_INTERVAL", 5))  # 감지 간격 (초) - 환경변수로 조정 가능
+DETECTION_INTERVAL = int(os.getenv("DETECTION_INTERVAL", 5))
 
 def run_stress_calculator():
     print("[Stress] 스트레스 계산 시작...")
     while not stop_event.is_set():
-        time.sleep(5)
+        time.sleep(DETECTION_INTERVAL)
 
         state = get_state()
         emotion_scores = state["emotion_scores"]
+        face_emotion = state["face_emotion"] or "무감정"
 
         if not emotion_scores:
             continue
@@ -31,16 +30,24 @@ def run_stress_calculator():
         if not need_llm:
             continue
 
-        # 2단계: 쿨다운 체크
-        if is_cooldown_active(round(vad_stress)):
-            remaining = get_remaining_cooldown(round(vad_stress))
+        # 2단계: DB 기반 쿨다운 체크
+        is_active, remaining = check_cooldown()
+        if is_active:
             print(f"[Main] 쿨다운 중 → {remaining}분 남음")
             continue
 
-        # 3단계: AI 서버로 LLM 요청
+        # 3단계: 감정 로그 저장
         stt_text = get_recent_stt()
-        face_emotion = state["face_emotion"] or "무감정"
+        emotion_log_id = save_emotion_log(
+            face_emotion=face_emotion,
+            face_confidence=max(emotion_scores.values()),
+            speech_text=stt_text,
+            vad_stress_score=vad_stress,
+            final_stress_level=None,         # LLM 보정 후 업데이트
+            intervention_triggered=False,    # 개입 확정 후 업데이트
+        )
 
+        # 4단계: AI 서버로 LLM 요청
         result = request_llm(
             vad_stress=vad_stress,
             stt_text=stt_text,
@@ -57,10 +64,15 @@ def run_stress_calculator():
 
         update_state(stress_level=stress_level)
 
-        if recommendation:
+        # 5단계: 개입 발생 시 DB 저장
+        if recommendation and emotion_log_id:
             print(f"\n[추천 결과]\n{recommendation}\n")
-            update_intervention_time()
-            # TODO: backend/api_client.py 연동
+            cooldown_minutes = int(os.getenv("COOLDOWN_MINUTES", 30))
+            save_intervention(
+                emotion_log_id=emotion_log_id,
+                agent_message=recommendation,
+                cooldown_minutes=cooldown_minutes,
+            )
 
 def print_state():
     while not stop_event.is_set():
