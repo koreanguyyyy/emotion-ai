@@ -1,5 +1,7 @@
 # tools/music_tool.py
 import os
+import random
+import time
 import requests
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -9,28 +11,60 @@ load_dotenv()
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
-SPOTIFY_CLIENT_ID_STR = str(SPOTIFY_CLIENT_ID)
-SPOTIFY_CLIENT_SECRET_STR = str(SPOTIFY_CLIENT_SECRET)  
+# ── 토큰 캐싱 ──────────────────────────────────────────
+_token_cache = {"token": None, "expires_at": 0}
 
 def get_access_token() -> str:
+    if _token_cache["token"] and time.time() < _token_cache["expires_at"]:
+        return _token_cache["token"]
+
     response = requests.post(
         "https://accounts.spotify.com/api/token",
         data={"grant_type": "client_credentials"},
-        auth=(SPOTIFY_CLIENT_ID_STR, SPOTIFY_CLIENT_SECRET_STR)
+        auth=(str(SPOTIFY_CLIENT_ID), str(SPOTIFY_CLIENT_SECRET)),
     )
     response.raise_for_status()
-    return response.json()["access_token"]
+    data = response.json()
+    _token_cache["token"] = data["access_token"]
+    _token_cache["expires_at"] = time.time() + data["expires_in"] - 60
+    return _token_cache["token"]
 
-# 감정 → 검색 키워드 매핑
-EMOTION_QUERY_MAP = {
-    "슬픔":   ("sad calm acoustic", 0.2, 0.3),   # (query, valence, energy)
-    "분노":   ("calm peaceful relax", 0.4, 0.2),
-    "공포":   ("calm soothing ambient", 0.3, 0.2),
-    "혐오":   ("healing nature calm", 0.4, 0.3),
-    "놀람":   ("uplifting positive", 0.7, 0.6),
-    "무감정": ("focus lo-fi chill", 0.5, 0.4),
-    "행복":   ("happy upbeat positive", 0.9, 0.8),
+
+# ── 감정 → 검색 키워드 풀 ──────────────────────────────
+# 매 요청마다 키워드를 랜덤 조합하여 다른 결과 유도
+EMOTION_KEYWORDS = {
+    "분노": {
+        "moods": ["calm", "peaceful", "relaxing", "soothing", "gentle"],
+        "genres": ["acoustic", "piano", "ambient", "classical", "lo-fi"],
+    },
+    "슬픔": {
+        "moods": ["comforting", "healing", "warm", "hopeful", "uplifting"],
+        "genres": ["indie", "folk", "acoustic", "soul", "R&B"],
+    },
+    "행복": {
+        "moods": ["happy", "upbeat", "party", "energetic", "fun"],
+        "genres": ["pop", "dance", "disco", "k-pop", "funk"],
+    },
+    "공포": {
+        "moods": ["calm", "safe", "soothing", "serene", "tranquil"],
+        "genres": ["ambient", "classical", "piano", "new age", "chill"],
+    },
+    "혐오": {
+        "moods": ["healing", "fresh", "clean", "peaceful", "nature"],
+        "genres": ["acoustic", "folk", "indie", "singer-songwriter", "chill"],
+    },
+    "놀람": {
+        "moods": ["chill", "steady", "mellow", "smooth", "easy"],
+        "genres": ["jazz", "bossa nova", "lo-fi", "soul", "R&B"],
+    },
+    "무감정": {
+        "moods": ["focus", "concentration", "study", "thinking", "chill"],
+        "genres": ["lo-fi", "ambient", "electronic", "jazz", "instrumental"],
+    },
 }
+
+DEFAULT_EMOTION = "슬픔"
+
 
 @tool
 def recommend_music(face_emotion: str) -> str:
@@ -40,9 +74,15 @@ def recommend_music(face_emotion: str) -> str:
     """
     try:
         token = get_access_token()
-        query, valence, energy = EMOTION_QUERY_MAP.get(
-            face_emotion, ("calm relax", 0.5, 0.4)
-        )
+        keywords = EMOTION_KEYWORDS.get(face_emotion, EMOTION_KEYWORDS[DEFAULT_EMOTION])
+
+        # 매번 다른 키워드 조합 생성
+        mood = random.choice(keywords["moods"])
+        genre = random.choice(keywords["genres"])
+        query = f"{mood} {genre}"
+
+        # 랜덤 offset으로 다른 페이지의 결과 가져오기
+        offset = random.randint(0, 20)
 
         response = requests.get(
             "https://api.spotify.com/v1/search",
@@ -50,24 +90,49 @@ def recommend_music(face_emotion: str) -> str:
             params={
                 "q": query,
                 "type": "track",
-                "limit": 3,
-                "market": "KR"
-            }
+                "limit": 10,
+                "offset": offset,
+                "market": "KR",
+            },
         )
-        response.raise_for_status()
-        tracks = response.json()["tracks"]["items"]
 
+        # Rate limit 처리
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", "1"))
+            time.sleep(retry_after)
+            
+            
+            response = requests.get(
+                "https://api.spotify.com/v1/search",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "q": query,
+                    "type": "track",
+                    "limit": 10,
+                    "offset": offset,
+                    "market": "KR",
+                },
+            )
+
+        response.raise_for_status()
+
+        tracks = response.json().get("tracks", {}).get("items", [])
         if not tracks:
             return "추천할 음악을 찾지 못했습니다."
 
+        # 20개 중 랜덤 5개 선택
+        picks = random.sample(tracks, min(5, len(tracks)))
+
         result = []
-        for track in tracks:
+        for track in picks:
             name = track["name"]
             artist = track["artists"][0]["name"]
             url = track["external_urls"]["spotify"]
             result.append(f"- {name} / {artist}\n  {url}")
 
-        return "추천 음악:\n" + "\n".join(result)
+        return f"[{face_emotion}] 감정 기반 추천 음악 (검색: {query}):\n" + "\n".join(result)
 
+    except requests.exceptions.HTTPError as e:
+        return f"Spotify API 오류: {e.response.status_code} - {e.response.text}"
     except Exception as e:
         return f"음악 추천 실패: {e}"

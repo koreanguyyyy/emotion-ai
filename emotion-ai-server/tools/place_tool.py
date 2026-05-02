@@ -39,8 +39,11 @@ def recommend_place(face_emotion: str) -> str:
                 "size": 3,
                 "sort": "accuracy",
                 # 위치는 추후 사용자 위치로 교체
-                "x": "126.9784",      # 기본값: 서울 중심
-                "y": "37.5665"
+                # "x": "126.9784",      # 기본값: 서울 중심
+                # "y": "37.5665"
+                
+                "x": "126.897543822094",
+                "y": "35.2097395400161",
             }
         )
         response.raise_for_status()
