@@ -8,6 +8,7 @@ import com.capstone.backend.domain.recommendation.dto.RecommendationResponseDto;
 import com.capstone.backend.domain.recommendation.entity.Recommendation;
 import com.capstone.backend.domain.recommendation.repository.RecommendationRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +42,14 @@ public class RecommendationService {
     @Transactional(readOnly = true)
     public List<RecommendationResponseDto> getRecommendationsByInterventionId(Long interventionId) {
         return recommendationRepository.findByInterventionInterventionId(interventionId)
+                .stream()
+                .map(RecommendationResponseDto::from)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<RecommendationResponseDto> getRecentRecommendationsByUserId(Long userId, int size) {
+        return recommendationRepository.findRecentByUserId(userId, PageRequest.of(0, size))
                 .stream()
                 .map(RecommendationResponseDto::from)
                 .collect(Collectors.toList());

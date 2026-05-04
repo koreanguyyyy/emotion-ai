@@ -1,6 +1,7 @@
 package com.capstone.backend.domain.intervention.entity;
 
 import com.capstone.backend.domain.emotion.entity.EmotionLog;
+import com.capstone.backend.domain.recommendation.entity.Recommendation;
 import com.capstone.backend.domain.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
@@ -8,6 +9,8 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "interventions", indexes = {
@@ -64,6 +67,10 @@ public class Intervention {
     @CreatedDate
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
+
+    @Builder.Default
+    @OneToMany(mappedBy = "intervention", fetch = FetchType.EAGER)
+    private List<Recommendation> recommendations = new ArrayList<>();
 
     public void submitFeedback(InterventionRating rating, EmotionAccuracy accuracy, String feedbackText) {
         this.interventionRating = rating;

@@ -3,9 +3,12 @@ package com.capstone.backend.domain.intervention.dto;
 import com.capstone.backend.domain.intervention.entity.EmotionAccuracy;
 import com.capstone.backend.domain.intervention.entity.Intervention;
 import com.capstone.backend.domain.intervention.entity.InterventionRating;
+import com.capstone.backend.domain.recommendation.dto.RecommendationResponseDto;
 import lombok.Builder;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Builder
 public record InterventionResponseDto(
@@ -20,7 +23,8 @@ public record InterventionResponseDto(
         EmotionAccuracy emotionAccuracy,
         String interventionFeedbackText,
         LocalDateTime feedbackAt,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        List<RecommendationResponseDto> recommendations
 ) {
     public static InterventionResponseDto from(Intervention intervention) {
         return InterventionResponseDto.builder()
@@ -36,6 +40,9 @@ public record InterventionResponseDto(
                 .interventionFeedbackText(intervention.getInterventionFeedbackText())
                 .feedbackAt(intervention.getFeedbackAt())
                 .createdAt(intervention.getCreatedAt())
+                .recommendations(intervention.getRecommendations().stream()
+                        .map(RecommendationResponseDto::from)
+                        .collect(Collectors.toList()))
                 .build();
     }
 }

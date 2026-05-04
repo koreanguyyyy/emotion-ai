@@ -11,6 +11,7 @@ import com.capstone.backend.domain.intervention.repository.InterventionRepositor
 import com.capstone.backend.domain.user.entity.User;
 import com.capstone.backend.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +51,14 @@ public class InterventionService {
     @Transactional(readOnly = true)
     public List<InterventionResponseDto> getInterventionsByUserId(Long userId) {
         return interventionRepository.findByUserUserIdOrderByCreatedAtDesc(userId)
+                .stream()
+                .map(InterventionResponseDto::from)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<InterventionResponseDto> getRecentInterventionsByUserId(Long userId, int size) {
+        return interventionRepository.findByUserUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, size))
                 .stream()
                 .map(InterventionResponseDto::from)
                 .collect(Collectors.toList());
