@@ -2,6 +2,8 @@
 import threading
 import time
 import os
+import logging
+
 from dotenv import load_dotenv
 from state.emotion_state import get_state, update_state, stop_event
 from detection.face_detector import run_face_detection
@@ -10,12 +12,23 @@ from ai.stress_calculator import should_call_llm, get_recent_stt
 from ai.llm_client import request_llm
 from backend.api_client import check_cooldown, save_emotion_log, save_intervention
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    handlers=[
+        logging.FileHandler("logs/main.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 DETECTION_INTERVAL = int(os.getenv("DETECTION_INTERVAL", 5))
 USER_ID = int(os.getenv("USER_ID", 1))
 
 def run_stress_calculator():
-    print("[Stress] 스트레스 계산 시작...")
+    logger.info("[Stress] 스트레스 계산 시작...")
     while not stop_event.is_set():
         time.sleep(DETECTION_INTERVAL)
 
@@ -34,7 +47,7 @@ def run_stress_calculator():
         # 2단계: DB 기반 쿨다운 체크
         is_active, remaining = check_cooldown()
         if is_active:
-            print(f"[Main] 쿨다운 중 → {remaining}분 남음")
+            logger.info(f"[Main] 쿨다운 중 → {remaining}분 남음")
             continue
 
         # 3단계: 감정 로그 저장
@@ -69,15 +82,15 @@ def run_stress_calculator():
 
         # 5단계: 개입 발생 시 DB 저장 (capstone-ai에서 처리하므로 detection은 로그만)
         if recommendation:
-            print(f"\n[추천 결과]\n{recommendation}\n")
+            logger.info(f"\n[추천 결과]\n{recommendation}\n")
 
 def print_state():
     while not stop_event.is_set():
         time.sleep(5)
         state = get_state()
-        print(f"\n[State] 표정: {state['face_emotion']} | "
-              f"텍스트: {state['stt_text']} | "
-              f"스트레스: {state['stress_level']}\n")
+        logger.info(f"\n[State] 표정: {state['face_emotion']} | "
+                    f"텍스트: {state['stt_text']} | "
+                    f"스트레스: {state['stress_level']}\n")
 
 if __name__ == "__main__":
     threads = [

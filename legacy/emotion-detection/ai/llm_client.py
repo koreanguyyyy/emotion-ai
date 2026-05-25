@@ -1,7 +1,19 @@
 # ai/llm_client.py
 import os
 import requests
+import logging
 from dotenv import load_dotenv
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    handlers=[
+        logging.FileHandler("logs/llm_client.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -38,13 +50,13 @@ def request_llm(
         )
         response.raise_for_status()
         result = response.json()
-        print(f"[LLM Client] 스트레스: {result['stress_level']}/10")
+        logger.info(f"[LLM Client] 스트레스: {result['stress_level']}/10")
         return result
 
     except requests.Timeout:
-        print("[LLM Client] 타임아웃 → VAD 값 사용")
+        logger.warning("[LLM Client] 타임아웃 → VAD 값 사용")
         return None
 
     except Exception as e:
-        print(f"[LLM Client] 서버 오류: {e} → VAD 값 사용")
+        logger.error(f"[LLM Client] 서버 오류: {e} → VAD 값 사용")
         return None
