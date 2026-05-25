@@ -1,6 +1,10 @@
 # backend/api_client.py
 import os
 import requests
+import logging
+
+from tenacity import retry, stop_after_attempt, wait_fixed
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,6 +13,9 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8080")
 USER_ID = int(os.getenv("USER_ID", 1))
 
 # ── 감정 로그 저장 ─────────────────────────────────────
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+# 감정 로그 저장 (재시도 3회, 2초 간격) - 네트워크 불안정 대비
+
 def save_emotion_log(
     face_emotion: str,
     face_confidence: float,
@@ -78,6 +85,8 @@ def check_cooldown() -> tuple[bool, int]:
         return False, 0
 
 # ── 개입 저장 ──────────────────────────────────────────
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+# 개입 저장 (재시도 3회, 2초 간격) - 네트워크 불안정 대비
 def save_intervention(
     emotion_log_id: int,
     agent_message: str,
@@ -113,6 +122,8 @@ def save_intervention(
         return None
 
 # ── 추천 저장 ──────────────────────────────────────────
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+# 추천 저장 (재시도 3회, 2초 간격) - 네트워크 불안정 대비
 def save_recommendation(
     intervention_id: int,
     category: str,

@@ -3,6 +3,17 @@ import time
 import threading
 import json
 import requests
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    handlers=[
+        logging.FileHandler("logs/stress_calculator.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ── VAD 테이블 ─────────────────────────────────────────
 # Valence: 긍정(1.0) ↔ 부정(0.0)
@@ -64,7 +75,7 @@ def check_cooldown() -> bool:
         elapsed = time.time() - last_intervention_time
         if elapsed < COOLDOWN_SEC:
             remaining = int(COOLDOWN_SEC - elapsed)
-            print(f"[쿨다운] {remaining}초 남음 → 개입 보류")
+            logger.info(f"[쿨다운] {remaining}초 남음 → 개입 보류")
             return False
         return True
 
@@ -74,7 +85,7 @@ def update_cooldown():
     global last_intervention_time
     with cooldown_lock:
         last_intervention_time = time.time()
-        print("[쿨다운] 타이머 리셋 (30분)")
+        logger.info("[쿨다운] 타이머 리셋 (30분)")
 
 
 # ── 1단계: 표정 VAD 스트레스 계산 (로컬 연산) ──────────
@@ -104,7 +115,7 @@ def calculate_face_stress(emotion_scores: dict) -> float:
         return 0.0
 
     result = round((stress / total_weight) * 10, 2)
-    print(f"[표정 스트레스] {result}/10")
+    logger.info(f"[표정 스트레스] {result}/10")
     return result
 
 
@@ -122,7 +133,7 @@ def calculate_text_stress(stt_text: str) -> float:
     - positive: (1 - intensity) * 3 (예: 0.7 → 0.9)
     """
     if not stt_text or stt_text.strip() == "":
-        print("[텍스트 스트레스] 텍스트 없음 → 기본값 3.0/10")
+        logger.info("[텍스트 스트레스] 텍스트 없음 → 기본값 3.0/10")
         return 3.0  # 텍스트 없으면 neutral 기본값
 
     prompt = f"""다음 텍스트의 감성을 분석하세요.
@@ -146,7 +157,7 @@ def calculate_text_stress(stt_text: str) -> float:
         response.raise_for_status()
 
         result_text = response.json().get("response", "").strip()
-        print(f"[Ollama 응답] {result_text}")
+        logger.info(f"[Ollama 응답] {result_text}")
 
         # JSON 파싱 (```json ... ``` 감싸기 제거)
         clean_text = result_text.replace("```json", "").replace("```", "").strip()
@@ -165,17 +176,17 @@ def calculate_text_stress(stt_text: str) -> float:
             text_stress = 3.0
 
         text_stress = round(text_stress, 2)
-        print(f"[텍스트 스트레스] sentiment={sentiment}, intensity={intensity} → {text_stress}/10")
+        logger.info(f"[텍스트 스트레스] sentiment={sentiment}, intensity={intensity} → {text_stress}/10")
         return text_stress
 
     except requests.exceptions.Timeout:
-        print("[텍스트 스트레스] Ollama 타임아웃 → 기본값 3.0/10")
+        logger.info("[텍스트 스트레스] Ollama 타임아웃 → 기본값 3.0/10")
         return 3.0
     except (json.JSONDecodeError, KeyError, ValueError) as e:
-        print(f"[텍스트 스트레스] 파싱 실패: {e} → 기본값 3.0/10")
+        logger.info(f"[텍스트 스트레스] 파싱 실패: {e} → 기본값 3.0/10")
         return 3.0
     except requests.exceptions.ConnectionError:
-        print("[텍스트 스트레스] Ollama 연결 실패 → 기본값 3.0/10")
+        logger.error("[텍스트 스트레스] Ollama 연결 실패 → 기본값 3.0/10")
         return 3.0
 
 
@@ -195,7 +206,7 @@ def calculate_final_stress(emotion_scores: dict) -> tuple[bool, float, dict]:
 
     # 3단계: 가중 평균
     final_stress = round(face_stress * FACE_WEIGHT + text_stress * TEXT_WEIGHT, 2)
-    print(f"[최종 스트레스] 표정({face_stress}) × {FACE_WEIGHT} + 텍스트({text_stress}) × {TEXT_WEIGHT} = {final_stress}/10")
+    logger.info(f"[최종 스트레스] 표정({face_stress}) × {FACE_WEIGHT} + 텍스트({text_stress}) × {TEXT_WEIGHT} = {final_stress}/10")
 
     # 상세 정보
     detail = {
@@ -208,7 +219,7 @@ def calculate_final_stress(emotion_scores: dict) -> tuple[bool, float, dict]:
 
     # 4단계: 임계값 + 쿨다운 체크
     if final_stress < VAD_THRESHOLD:
-        print(f"[판단] {final_stress} < {VAD_THRESHOLD} → 개입 불필요")
+        logger.info(f"[판단] {final_stress} < {VAD_THRESHOLD} → 개입 불필요")
         return False, final_stress, detail
 
     if not check_cooldown():
@@ -217,7 +228,7 @@ def calculate_final_stress(emotion_scores: dict) -> tuple[bool, float, dict]:
 
     # 개입 실행
     update_cooldown()
-    print(f"[판단] {final_stress} >= {VAD_THRESHOLD} → LLM 추천 호출!")
+    logger.info(f"[판단] {final_stress} >= {VAD_THRESHOLD} → LLM 추천 호출!")
     return True, final_stress, detail
 
 
@@ -228,4 +239,5 @@ def should_call_llm(emotion_scores: dict) -> tuple[bool, float]:
     반환값: (호출 여부, 최종 스트레스 점수)
     """
     should_intervene, final_stress, detail = calculate_final_stress(emotion_scores)
+    logger.info(f"[하위 호환] LLM 호출 여부: {should_intervene}, 스트레스 점수: {final_stress}")
     return should_intervene, final_stress
