@@ -1,10 +1,25 @@
 # agent/nodes.py
+
+import logging
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage
 from llm.model import llm
 from agent.state import AgentState
 from tools import ALL_TOOLS
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("logs/agent.log", encoding="utf-8"), # 로그 파일로 저장
+        logging.StreamHandler() # 콘솔에도 출력
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
 
 # ── LLM에 Tool 바인딩 ──────────────────────────────────
 llm_with_tools = llm.bind_tools(ALL_TOOLS)
@@ -28,7 +43,7 @@ stress_chain = stress_prompt | llm | StrOutputParser()
 def correct_stress(state: AgentState) -> AgentState:
     if not state["stt_text"]:
         state["stress_level"] = round(state["vad_stress"])
-        print(f"[Node] 텍스트 없음 → VAD 값 사용: {state['stress_level']}/10")
+        logger.info(f"[Node] 텍스트 없음 → VAD 값 사용: {state['stress_level']}/10")
         return state
 
     try:
@@ -39,9 +54,9 @@ def correct_stress(state: AgentState) -> AgentState:
         })
         stress = int("".join(filter(str.isdigit, result.strip()))[:1])
         state["stress_level"] = max(0, min(10, stress))
-        print(f"[Node] LLM 보정: {state['vad_stress']} → {state['stress_level']}/10")
+        logger.info(f"[Node] LLM 보정: {state['vad_stress']} → {state['stress_level']}/10")
     except Exception as e:
-        print(f"[Node] LLM 보정 실패: {e} → VAD 값 사용")
+        logger.error(f"[Node] LLM 보정 실패: {e} → VAD 값 사용")
         state["stress_level"] = round(state["vad_stress"])
 
     return state
@@ -52,13 +67,13 @@ def decide_intervention(state: AgentState) -> AgentState:
         state["recommendation"] = "개입 필요"
     else:
         state["recommendation"] = "개입 불필요"
-    print(f"[Node] 판단: {state['recommendation']} (스트레스: {state['stress_level']}/10)")
+    logger.info(f"[Node] 판단: {state['recommendation']} (스트레스: {state['stress_level']}/10)")
     return state
 
 # ── 노드 3: Tool Calling 추천 ──────────────────────────
 # agent/nodes.py - recommend 노드만 수정
 def recommend(state: AgentState) -> AgentState:
-    print("[Node] Tool Calling 추천 시작...")
+    logger.info("[Node] Tool Calling 추천 시작...")
 
     prompt = f""" 
     사용자의 현재 상태:
@@ -90,31 +105,29 @@ def recommend(state: AgentState) -> AgentState:
         tool_results = []
         if response.tool_calls:
             tool_map = {t.name: t for t in ALL_TOOLS}
-            print(tool_map)
-            
+            logger.info(f"[Node] Tool 맵: {tool_map}")
+
             for tool_call in response.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
-                
-                
-                
-                print(f"[Node] Tool 호출: {tool_name}({tool_args})")
-                print("----------------------------------------------")
 
+
+
+                logger.info(f"[Node] Tool 호출: {tool_name}({tool_args})")
                 if tool_name in tool_map:
                     result = tool_map[tool_name].invoke(tool_args)
                     tool_results.append(result)
 
             state["recommendation"] = "\n\n".join(tool_results)
-            print(f"[Node] Tool 결과:\n{state['recommendation']}")
+            logger.info(f"[Node] Tool 결과:\n{state['recommendation']}")
         else:
-            print("[Node] Tool 호출 없음 → LLM이 텍스트로만 응답")
+            logger.info("[Node] Tool 호출 없음 → LLM이 텍스트로만 응답")
             state["recommendation"] = "추천을 생성하지 못했습니다. 다시 시도해주세요."
 
-        print("[Node] 추천 완료")
+        logger.info("[Node] 추천 완료")
 
     except Exception as e:
-        print(f"[Node] Tool Calling 실패: {e}")
+        logger.error(f"[Node] Tool Calling 실패: {e}")
         state["recommendation"] = "추천을 생성하지 못했습니다."
 
     return state
