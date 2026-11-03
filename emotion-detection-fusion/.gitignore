@@ -1,0 +1,18 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.pt
+*.bin
+models/
+temp_audio/
+temp_video/
+.DS_Store
+
+# 2026-11-04
+.env.lab
+logs/
+.vscode/
+audio/*.wav

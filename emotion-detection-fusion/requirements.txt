@@ -1,0 +1,21 @@
+# 표정 + 웹캠 심박 (2학기 emotion_pipeline)
+opencv-python>=4.8
+mediapipe>=0.10.30,<1.0
+numpy>=1.24
+scipy>=1.10
+# 음성 인식 (1학기와 동일)
+openai-whisper
+sounddevice
+soundfile
+webrtcvad
+# 서버 통신
+requests
+python-dotenv
+tenacity
+# DeepFace / TensorFlow는 이 버전에서 필요 없음
+matplotlib                  # rPPG 진단 그래프 (없으면 .npz만 저장)
+# 학습된 표정 모델 (선택, FACE_MODEL=compare/use). 없으면 규칙 기반만 동작
+hsemotion-onnx
+
+# 자연스러운 음성 (TTS_ENGINE=edge, 2026-11-04)
+edge-tts
