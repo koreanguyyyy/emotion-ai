@@ -118,7 +118,7 @@ def recommend_music(face_emotion: str) -> str:
 
         tracks = response.json().get("tracks", {}).get("items", [])
         if not tracks:
-            return "추천할 음악을 찾지 못했습니다."
+            return fallback_music(face_emotion)
 
         # 20개 중 랜덤 5개 선택
         picks = random.sample(tracks, min(5, len(tracks)))
@@ -133,6 +133,37 @@ def recommend_music(face_emotion: str) -> str:
         return f"[{face_emotion}] 감정 기반 추천 음악 (검색: {query}):\n" + "\n".join(result)
 
     except requests.exceptions.HTTPError as e:
-        return f"Spotify API 오류: {e.response.status_code} - {e.response.text}"
+        print(f"[Music] Spotify API 오류 {e.response.status_code} → 기본 곡 목록 사용")
+        return fallback_music(face_emotion)
     except Exception as e:
-        return f"음악 추천 실패: {e}"
+        print(f"[Music] 음악 추천 실패: {e} → 기본 곡 목록 사용")
+        return fallback_music(face_emotion)
+
+
+# ── Spotify를 못 쓸 때 쓰는 기본 곡 목록 (2026-11-04) ──────────────
+# Spotify 검색 API가 앱 소유자의 프리미엄 구독을 요구하게 바뀌어(403) 추천이 실패했다.
+# 감정별로 실제 곡을 골라 두고, 링크는 Spotify 검색 주소로 준다(곡 ID를 지어내지 않기 위해).
+FALLBACK_TRACKS = {
+    "분노": [("Clair de Lune", "Claude Debussy"), ("Weightless", "Marconi Union"), ("River Flows in You", "Yiruma"),
+            ("Gymnopédie No.1", "Erik Satie"), ("밤편지", "아이유")],
+    "슬픔": [("Fix You", "Coldplay"), ("Lean on Me", "Bill Withers"), ("수고했어, 오늘도", "옥상달빛"),
+            ("Here Comes the Sun", "The Beatles"), ("위로", "권진아")],
+    "공포": [("Weightless", "Marconi Union"), ("Clair de Lune", "Claude Debussy"), ("Kiss the Rain", "Yiruma"),
+            ("Experience", "Ludovico Einaudi"), ("Holocene", "Bon Iver")],
+    "혐오": [("Banana Pancakes", "Jack Johnson"), ("Bubbly", "Colbie Caillat"), ("봄봄봄", "로이킴"),
+            ("Better Together", "Jack Johnson"), ("Riptide", "Vance Joy")],
+    "놀람": [("Sunday Morning", "Maroon 5"), ("Fly Me to the Moon", "Frank Sinatra"), ("Put Your Records On", "Corinne Bailey Rae"),
+            ("Valerie", "Amy Winehouse"), ("좋은 날", "아이유")],
+    "무감정": [("Nuvole Bianche", "Ludovico Einaudi"), ("Experience", "Ludovico Einaudi"), ("Snowman", "Sia"),
+             ("Coffee", "beabadoobee"), ("Blueming", "아이유")],
+    "행복": [("Happy", "Pharrell Williams"), ("Walking on Sunshine", "Katrina and the Waves"), ("Dynamite", "BTS"),
+            ("Good Day", "아이유"), ("Can't Stop the Feeling!", "Justin Timberlake")],
+}
+
+
+def fallback_music(face_emotion: str) -> str:
+    from urllib.parse import quote
+    tracks = FALLBACK_TRACKS.get(face_emotion, FALLBACK_TRACKS["무감정"])
+    picks = random.sample(tracks, min(3, len(tracks)))
+    lines = [f"- {name} / {artist}\n  https://open.spotify.com/search/{quote(name + ' ' + artist)}" for name, artist in picks]
+    return f"[{face_emotion}] 감정 기반 추천 음악 (기본 목록):\n" + "\n".join(lines)

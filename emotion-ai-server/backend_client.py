@@ -54,63 +54,82 @@ def save_recommendations(
     recommendation_text: str,
 ) -> int | None:
     """
-    LLM 추천 결과 텍스트를 파싱해서 각 항목을 DB에 저장
-    반환값: 첫 번째 recommendation_id (피드백 제출용)
+    챗봇 형식 추천 텍스트에서 URL 기반으로 항목 파싱 후 DB 저장
     """
+    # 카테고리 키워드로 현재 카테고리 추적
     category_map = {
-        "음악": "MUSIC",
-        "도서": "BOOK",
-        "장소": "PLACE",
-        "영화": "MOVIE",
+        "spotify": "MUSIC",
+        "aladin": "BOOK",
+        "kakao": "PLACE",
+        "tmdb": "MOVIE",
     }
 
-    current_category = None
     first_recommendation_id = None
     lines = recommendation_text.split("\n")
-    i = 0
 
-    while i < len(lines):
-        line = lines[i].strip()
+    for i, line in enumerate(lines):
+        line = line.strip()
 
-        for keyword, category in category_map.items():
-            if keyword in line and ("추천" in line or ":" in line):
-                current_category = category
-                break
+        # URL 감지
+        if line.startswith("http"):
+            external_url = line
 
-        if line.startswith("-") and current_category:
-            item_line = line.lstrip("- ").strip()
+            # URL로 카테고리 판단
+            category = "MUSIC"  # 기본값
+            for keyword, cat in category_map.items():
+                if keyword in external_url.lower():
+                    category = cat
+                    break
 
-            if "/" in item_line:
-                parts = item_line.split("/", 1)
-                title = parts[0].strip()
-                artist_or_author = parts[1].strip()
-            else:
-                title = item_line
-                artist_or_author = None
+            # URL 바로 위 문장에서 제목/아티스트 추출
+            title = None
+            artist_or_author = None
 
-            external_url = None
-            if i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                if next_line.startswith("http"):
-                    external_url = next_line
-                    i += 1
+            for j in range(i - 1, max(i - 4, -1), -1):
+                prev_line = lines[j].strip()
+                if not prev_line or prev_line.startswith("http"):
+                    continue
+
+                # '제목' 또는 '아티스트의 제목' 패턴 추출
+                # 예) "Natalie Jane Hill의 'Never Left Me'를 추천드려요."
+                import re
+
+                # 작은따옴표로 감싼 제목 추출
+                quoted = re.findall(r"'([^']+)'", prev_line)
+                if quoted:
+                    title = quoted[-1]
+
+                # '~의' 패턴으로 아티스트 추출
+                artist_match = re.search(r"([가-힣A-Za-z\s]+)의\s*'", prev_line)
+                if artist_match:
+                    artist_or_author = artist_match.group(1).strip()
+
+                if title:
+                    break
+
+            # 제목 못 찾으면 URL 앞 문장 전체를 title로
+            if not title:
+                for j in range(i - 1, max(i - 4, -1), -1):
+                    prev_line = lines[j].strip()
+                    if prev_line and not prev_line.startswith("http"):
+                        title = prev_line[:100]  # 최대 100자
+                        break
+
+            if not title:
+                title = "추천 항목"
 
             rec_id = _save_single_recommendation(
                 intervention_id=intervention_id,
-                category=current_category,
+                category=category,
                 title=title,
                 artist_or_author=artist_or_author,
                 external_url=external_url,
             )
 
-            # 첫 번째 recommendation_id 저장
             if first_recommendation_id is None and rec_id:
                 first_recommendation_id = rec_id
 
-        i += 1
-
     return first_recommendation_id
-
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=4))
 # 재시도 3회, 지수 백오프 (1s → 2s → 4s)
 def _save_single_recommendation(

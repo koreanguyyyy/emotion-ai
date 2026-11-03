@@ -28,8 +28,14 @@ def run_agent(
     user_id: int,
     emotion_log_id: int,
     cooldown_minutes: int = 30,
+    force: bool = False,
+    memory_key: str | None = None,
+    speech_history: list | None = None,
 ) -> dict:
     result = app.invoke({
+        "force": force,
+        "memory_key": memory_key,
+        "speech_history": speech_history or [],
         "vad_stress": vad_stress,
         "stt_text": stt_text,
         "face_emotion": face_emotion,
