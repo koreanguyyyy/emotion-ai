@@ -3,18 +3,24 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import ChatBubble from "@/components/chat/ChatBubble";
+import ConversationBubble from "@/components/chat/ConversationBubble";
+import { Button } from "@/components/ui/button";
+import { Loader2, MessageCircle, Send, UserPlus, X, Zap } from "lucide-react";
 import { getRecentEmotionLogs } from "@/api/emotion";
 import {
   getInterventions,
   submitInterventionFeedback,
 } from "@/api/intervention";
-import type { EmotionLog, Intervention, InterventionRating } from "@/types";
-import { EMOTION_LABELS } from "@/types";
+import { endChat, getLiveState, resetVisitor, sendChatMessage, startChat, triggerIntervention } from "@/api/live";
+import type { EmotionLog, Intervention, InterventionRating, LiveState } from "@/types";
+import { EMOTION_LABELS, HR_MODE_LABELS, logEmotion, logStress, normalizeEmotion } from "@/types";
 import { format } from "date-fns";
 import { useTheme } from "@/hooks/useTheme";
 
 const USER_ID = Number(import.meta.env.VITE_USER_ID) || 1;
 const POLL_INTERVAL = 5000;
+const LIVE_INTERVAL = 1000;
+const LIVE_INTERVAL_BUSY = 200;   // 에이전트가 답하는 중에는 자주 읽어 글자가 이어지듯 보이게
 const MAX_BUBBLES = 20;
 
 const EMOTION_EMOJI: Record<string, string> = {
@@ -50,6 +56,10 @@ export default function Monitor() {
   const lastInterventionIdRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [live, setLive] = useState<LiveState | null>(null);
+  const [liveOk, setLiveOk] = useState(false);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -130,10 +140,101 @@ export default function Monitor() {
     return () => clearInterval(interval);
   }, []);
 
+  // 실시간 상태: 감지 프로그램의 상태 통로를 1초마다(답이 오는 중에는 0.2초마다) 읽는다.
+  // 연결이 안 되면 저장된 최근 기록을 보여준다.
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      let busy = false;
+      try {
+        const s = await getLiveState();
+        if (!alive) return;
+        setLive(s);
+        setLiveOk(true);
+        setLastUpdate(new Date());
+        busy = !!s.chat?.busy;
+      } catch {
+        if (alive) setLiveOk(false);
+      }
+      if (alive) timer = setTimeout(tick, busy ? LIVE_INTERVAL_BUSY : LIVE_INTERVAL);
+    };
+    tick();
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  // 이어지는 대화: 감지 프로그램이 /state의 chat으로 알려 준다 (음성으로 한 말도 여기 나타남)
+  const chat = liveOk ? live?.chat ?? null : null;
+  const chatActive = !!chat?.active;
+  const chatBusy = !!chat?.busy;
+  // 첫 메시지는 개입 말풍선(피드백 버튼 있음)으로 이미 보이면 다시 그리지 않는다
+  const convo = (chat?.messages ?? []).filter(
+    (m) =>
+      !(m.source === "intervention" && chat?.interventionId != null &&
+        messages.some((b) => b.interventionId === chat.interventionId))
+  );
+  const convoCount = convo.length;
+  const streamingLen = convo.length ? convo[convo.length - 1].text.length : 0;
+  const lastStreaming = convo.length > 0 && !!convo[convo.length - 1].streaming;
+
   // Auto-scroll on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, convoCount, chatBusy, streamingLen]);
+
+  async function handleSend(e?: React.FormEvent) {
+    e?.preventDefault();
+    const text = input.trim();
+    if (!text || sending || chatBusy) return;
+    setSending(true);
+    try {
+      const r = await sendChatMessage(text);
+      if (r.ok) setInput("");
+      else showToast("에이전트가 답하는 중이에요. 잠시 뒤에 보내 주세요.");
+    } catch {
+      showToast("감지 프로그램(main.py)이 실행 중이어야 대화할 수 있어요.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleStartOrEnd() {
+    try {
+      if (chatActive) await endChat();
+      else await startChat();
+    } catch {
+      showToast("감지 프로그램(main.py)이 실행 중이어야 대화할 수 있어요.");
+    }
+  }
+
+  async function handleReset() {
+    try {
+      await resetVisitor();
+      setMessages([]);   // 앞사람의 개입 말풍선도 화면에서 지운다 (DB 기록은 그대로)
+      setInput("");
+      showToast("새 관람객 — 잠깐 편한 얼굴로 화면을 봐 주세요");
+    } catch {
+      showToast("감지 프로그램(main.py)이 실행 중이어야 해요.");
+    }
+  }
+
+  async function handleIntervene() {
+    try {
+      const r = await triggerIntervention();
+      showToast(r.ok ? "몇 초 안에 에이전트가 말을 걸어요" : "이미 대화 중이에요");
+    } catch {
+      showToast("감지 프로그램(main.py)이 실행 중이어야 해요.");
+    }
+  }
+
+  const END_TEXT: Record<string, string> = {
+    agent: "에이전트가 대화를 마무리했어요",
+    user: "대화를 끝냈어요",
+    idle: "한동안 말이 없어 대화를 마쳤어요",
+  };
 
   async function handleFeedback(
     interventionId: number,
@@ -154,8 +255,22 @@ export default function Monitor() {
     }
   }
 
-  const emotion = latestLog?.primaryEmotion?.toLowerCase() ?? "";
-  const stressLevel = latestLog?.finalStressLevel ?? 0;
+  // 실시간 통로가 연결되면 그 값을, 아니면 백엔드의 최근 기록을 쓴다
+  const useLive = liveOk && live !== null;
+  const emotion = useLive
+    ? live.faceDetected ? normalizeEmotion(live.faceEmotion) : ""
+    : latestLog ? logEmotion(latestLog) : "";
+  const stressLevel = useLive ? live.stressIndex ?? 0 : latestLog ? logStress(latestLog) : 0;
+  const heartRate = useLive ? live.heartRate : latestLog?.heartRate ?? null;
+  const restingHr = useLive ? live.restingHeartRate : latestLog?.restingHeartRate ?? null;
+  const hrMode = useLive ? live.hrMode : latestLog?.hrMode ?? null;
+  const speech = useLive ? live.speechText ?? latestLog?.speechText : latestLog?.speechText;
+  const parts: { label: string; value: number | null | undefined; weight: string }[] = [
+    { label: "부정 표정", value: useLive ? live.stressNeg : latestLog?.stressNeg, weight: "35%" },
+    { label: "심박 상승", value: useLive ? live.stressHr : latestLog?.stressHr, weight: "35%" },
+    { label: "표정 각성", value: useLive ? live.stressArousal : latestLog?.stressArousal, weight: "10%" },
+    { label: "감정 기복", value: useLive ? live.stressInstab : latestLog?.stressInstab, weight: "20%" },
+  ];
 
   if (loading) {
     return (
@@ -182,7 +297,7 @@ export default function Monitor() {
                   {EMOTION_EMOJI[emotion] ?? "❓"}
                 </span>
                 <span className="font-medium text-sm">
-                  {EMOTION_LABELS[emotion] ?? "대기 중"}
+                  {emotion ? EMOTION_LABELS[emotion] : "얼굴 인식 대기"}
                 </span>
               </div>
             </div>
@@ -199,42 +314,119 @@ export default function Monitor() {
                     } as React.CSSProperties
                   }
                 />
-                <span className="text-sm font-bold w-8 text-right">
-                  {stressLevel}/10
+                <span className="text-sm font-bold w-14 text-right">
+                  {stressLevel.toFixed(1)}/10
                 </span>
               </div>
             </div>
 
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">최근 발화</p>
-              <p className="text-sm truncate font-medium">
-                {latestLog?.speechText ?? "-"}
+              <p className="text-xs text-muted-foreground">
+                심박 ({useLive && live.hrSource === "watch" ? "워치" : "웹캠"})
               </p>
+              <p className="text-sm font-medium">
+                {heartRate != null ? `${Math.round(heartRate)} bpm` : "측정 대기"}
+                {restingHr != null && (
+                  <span className="text-muted-foreground font-normal"> · 평상시 {Math.round(restingHr)}</span>
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">{hrMode ? HR_MODE_LABELS[hrMode] ?? hrMode : "-"}</p>
+              {useLive && live.watchHeartRate != null && (
+                <p className="text-xs text-muted-foreground">
+                  워치 {Math.round(live.watchHeartRate)} · 웹캠{" "}
+                  {live.webcamHeartRate != null ? Math.round(live.webcamHeartRate) : "--"}
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">마지막 업데이트</p>
+              <p className="text-xs text-muted-foreground">감지 프로그램</p>
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                  {liveOk && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  )}
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${liveOk ? "bg-green-500" : "bg-gray-400"}`} />
                 </span>
                 <span className="text-sm font-medium">
-                  {lastUpdate ? format(lastUpdate, "HH:mm:ss") : "-"}
+                  {liveOk ? "실시간 연결" : "연결 안 됨 · 저장된 기록 표시"}
                 </span>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {lastUpdate ? `마지막 업데이트 ${format(lastUpdate, "HH:mm:ss")}` : "-"}
+              </p>
             </div>
           </div>
+
+          <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-4 border-t pt-4">
+            {parts.map((p) => (
+              <div key={p.label} className="space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  {p.label} <span className="opacity-70">({p.weight})</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <Progress value={(p.value ?? 0) * 100} className="flex-1 h-2" />
+                  <span className="text-xs w-10 text-right">{p.value != null ? p.value.toFixed(2) : "모름"}</span>
+                </div>
+              </div>
+            ))}
+            <div className="space-y-1 col-span-2 lg:col-span-1">
+              <p className="text-xs text-muted-foreground">최근 발화</p>
+              <p className="text-sm truncate font-medium">{speech || "-"}</p>
+            </div>
+          </div>
+          {useLive && !live.faceBaselineReady && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              평소 표정을 기록하는 중입니다(잠깐이면 돼요). 편한 얼굴로 화면을 봐 주세요.
+            </p>
+          )}
         </CardContent>
       </Card>
 
       {/* Chat Area */}
       <Card className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+          <div className="flex items-center gap-2 text-sm">
+            <MessageCircle className="h-4 w-4" />
+            {chatActive ? (
+              <span className="font-medium">
+                대화 중
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  말로 대답하거나 아래에 입력하세요
+                  {chat?.idleLeftSec != null && !chatBusy && ` · ${chat.idleLeftSec}초 뒤 자동 종료`}
+                </span>
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                {chat?.endReason ? END_TEXT[chat.endReason] : "스트레스가 높아지면 에이전트가 먼저 말을 걸어요"}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="h-8" disabled={!liveOk} onClick={handleReset}
+            title="전시용: 기준선을 다시 잡고 대화를 비워요">
+            <UserPlus className="h-3.5 w-3.5" /> 새 관람객
+          </Button>
+          {!chatActive && (
+            <Button variant="outline" size="sm" className="h-8" disabled={!liveOk} onClick={handleIntervene}
+              title="시연용: 스트레스 지수와 상관없이 지금 개입 흐름을 실행해요">
+              <Zap className="h-3.5 w-3.5" /> 지금 말 걸기
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="h-8" disabled={!liveOk} onClick={handleStartOrEnd}>
+            {chatActive ? (
+              <><X className="h-3.5 w-3.5" /> 대화 끝내기</>
+            ) : (
+              <><MessageCircle className="h-3.5 w-3.5" /> 대화 시작</>
+            )}
+          </Button>
+          </div>
+        </div>
         <CardContent className="flex-1 overflow-y-auto p-4 space-y-6">
-          {messages.length === 0 ? (
+          {messages.length === 0 && convo.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <span className="text-4xl">🤖</span>
-              <p className="text-sm">AI 추천이 도착하면 여기에 표시됩니다</p>
+              <p className="text-sm">에이전트가 말을 걸면 여기에 대화가 표시됩니다</p>
               <Badge variant="outline" className="text-xs">
                 5초마다 자동 업데이트
               </Badge>
@@ -252,8 +444,30 @@ export default function Monitor() {
               />
             ))
           )}
+          {convo.map((m) => (
+            <ConversationBubble key={`${chat?.sessionId}-${m.id}`} message={m} darkMode={dark} />
+          ))}
+          {chatBusy && !lastStreaming && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground pl-11">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> 에이전트가 답을 생각하는 중…
+            </div>
+          )}
           <div ref={chatEndRef} />
         </CardContent>
+        <form onSubmit={handleSend} className="flex gap-2 border-t p-3">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            maxLength={500}
+            disabled={!liveOk}
+            placeholder={liveOk ? "에이전트에게 하고 싶은 말을 입력하세요" : "감지 프로그램이 연결되면 대화할 수 있어요"}
+            className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          />
+          <Button type="submit" disabled={!liveOk || !input.trim() || sending || chatBusy}>
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            보내기
+          </Button>
+        </form>
       </Card>
 
       {/* Toast */}

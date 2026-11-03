@@ -13,7 +13,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import EmotionTimeline from "@/components/charts/EmotionTimeline";
 import { getEmotionLogs } from "@/api/emotion";
 import type { EmotionLog } from "@/types";
-import { EMOTION_LABELS, EMOTION_COLORS } from "@/types";
+import { EMOTION_LABELS, EMOTION_COLORS, logEmotion, logStress } from "@/types";
 import { format, parseISO, isSameDay, addDays, subDays } from "date-fns";
 
 const USER_ID = Number(import.meta.env.VITE_USER_ID) || 1;
@@ -39,7 +39,7 @@ export default function EmotionHistory() {
 
   const emotionSet = useMemo(() => {
     const set = new Set<string>();
-    dayLogs.forEach((l) => set.add((l.primaryEmotion ?? l.faceEmotion ?? "neutral").toLowerCase()));
+    dayLogs.forEach((l) => set.add(logEmotion(l)));
     return Array.from(set);
   }, [dayLogs]);
 
@@ -50,7 +50,7 @@ export default function EmotionHistory() {
     }
     dayLogs.forEach((l) => {
       const h = parseISO(l.detectedAt).getHours();
-      const emotion = (l.primaryEmotion ?? l.faceEmotion ?? "neutral").toLowerCase();
+      const emotion = logEmotion(l);
       const key = `${h}시`;
       hours[key][emotion] = (hours[key][emotion] || 0) + 1;
     });
@@ -121,13 +121,14 @@ export default function EmotionHistory() {
                   <TableHead>시간</TableHead>
                   <TableHead>감정</TableHead>
                   <TableHead>스트레스</TableHead>
+                  <TableHead className="hidden md:table-cell">심박</TableHead>
                   <TableHead className="hidden sm:table-cell">발화 텍스트</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pagedLogs.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
                       해당 날짜에 감정 로그가 없습니다
                     </TableCell>
                   </TableRow>
@@ -145,15 +146,17 @@ export default function EmotionHistory() {
                             className="inline-block h-2.5 w-2.5 rounded-full"
                             style={{
                               backgroundColor:
-                                EMOTION_COLORS[(log.primaryEmotion ?? log.faceEmotion ?? "neutral").toLowerCase()] ??
+                                EMOTION_COLORS[logEmotion(log)] ??
                                 "#95A5A6",
                             }}
                           />
-                          {EMOTION_LABELS[(log.primaryEmotion ?? log.faceEmotion ?? "neutral").toLowerCase()] ??
-                            (log.primaryEmotion ?? log.faceEmotion ?? "neutral")}
+                          {EMOTION_LABELS[logEmotion(log)]}
                         </span>
                       </TableCell>
-                      <TableCell>{log.finalStressLevel ?? 0}/10</TableCell>
+                      <TableCell>{logStress(log)}/10</TableCell>
+                      <TableCell className="hidden md:table-cell whitespace-nowrap">
+                        {log.heartRate != null ? `${Math.round(log.heartRate)} bpm` : "-"}
+                      </TableCell>
                       <TableCell className="hidden sm:table-cell max-w-xs truncate">
                         {log.speechText ?? "-"}
                       </TableCell>
