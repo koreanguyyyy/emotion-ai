@@ -182,7 +182,9 @@ export default function Monitor() {
 
   // Auto-scroll on new messages
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // 채팅 칸 안에서만 내린다 (scrollIntoView는 페이지 전체까지 밀어 올려 상단 상태 카드가 잘렸다)
+    const box = chatEndRef.current?.parentElement;
+    if (box) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
   }, [messages, convoCount, chatBusy, streamingLen]);
 
   async function handleSend(e?: React.FormEvent) {
@@ -285,7 +287,7 @@ export default function Monitor() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)] gap-4">
+    <div className="flex flex-col h-full min-h-0 gap-4">
       {/* Status Bar */}
       <Card>
         <CardContent className="p-4">
