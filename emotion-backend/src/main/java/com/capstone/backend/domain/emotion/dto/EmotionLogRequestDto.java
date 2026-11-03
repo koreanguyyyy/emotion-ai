@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 @Builder
 public record EmotionLogRequestDto(
         @NotNull Long userId,
+        String primaryEmotion,
+        BigDecimal confidenceScore,
         String faceEmotion,
         BigDecimal faceConfidence,
         String speechText,
@@ -15,5 +17,15 @@ public record EmotionLogRequestDto(
         Integer finalStressLevel,
         Boolean sighDetected,
         String motionPattern,
-        Boolean interventionTriggered
+        Boolean interventionTriggered,
+        BigDecimal heartRate,
+        BigDecimal restingHeartRate,
+        BigDecimal stressNeg,
+        BigDecimal stressHr,
+        BigDecimal stressArousal,
+        BigDecimal stressInstab,
+        String hrMode,
+        String faceMethod,
+        String modelEmotion,
+        String logType
 ) {}

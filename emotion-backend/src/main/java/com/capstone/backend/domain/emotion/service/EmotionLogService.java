@@ -29,6 +29,9 @@ public class EmotionLogService {
                 .orElseThrow(() -> new EntityNotFoundException("사용자를 찾을 수 없습니다. userId=" + dto.userId()));
         EmotionLog log = EmotionLog.builder()
                 .user(user)
+                // 감지 프로그램이 보내는 primaryEmotion을 저장한다 (이전에는 DTO에 없어서 항상 비어 있었다)
+                .primaryEmotion(dto.primaryEmotion() != null ? dto.primaryEmotion() : dto.faceEmotion())
+                .confidenceScore(dto.confidenceScore() != null ? dto.confidenceScore() : dto.faceConfidence())
                 .faceEmotion(dto.faceEmotion())
                 .faceConfidence(dto.faceConfidence())
                 .speechText(dto.speechText())
@@ -37,6 +40,16 @@ public class EmotionLogService {
                 .sighDetected(dto.sighDetected() != null ? dto.sighDetected() : false)
                 .motionPattern(dto.motionPattern())
                 .interventionTriggered(dto.interventionTriggered())
+                .heartRate(dto.heartRate())
+                .restingHeartRate(dto.restingHeartRate())
+                .stressNeg(dto.stressNeg())
+                .stressHr(dto.stressHr())
+                .stressArousal(dto.stressArousal())
+                .stressInstab(dto.stressInstab())
+                .hrMode(dto.hrMode())
+                .faceMethod(dto.faceMethod())
+                .modelEmotion(dto.modelEmotion())
+                .logType(dto.logType())
                 .detectedAt(LocalDateTime.now())
                 .build();
         return EmotionLogResponseDto.from(emotionLogRepository.save(log));

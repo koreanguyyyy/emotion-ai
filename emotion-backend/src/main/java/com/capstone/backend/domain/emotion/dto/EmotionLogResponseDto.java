@@ -21,7 +21,17 @@ public record EmotionLogResponseDto(
         Boolean sighDetected,
         String motionPattern,
         Boolean interventionTriggered,
-        LocalDateTime detectedAt
+        LocalDateTime detectedAt,
+        BigDecimal heartRate,
+        BigDecimal restingHeartRate,
+        BigDecimal stressNeg,
+        BigDecimal stressHr,
+        BigDecimal stressArousal,
+        BigDecimal stressInstab,
+        String hrMode,
+        String faceMethod,
+        String modelEmotion,
+        String logType
 ) {
     public static EmotionLogResponseDto from(EmotionLog log) {
         return EmotionLogResponseDto.builder()
@@ -39,6 +49,16 @@ public record EmotionLogResponseDto(
                 .motionPattern(log.getMotionPattern())
                 .interventionTriggered(log.getInterventionTriggered())
                 .detectedAt(log.getDetectedAt())
+                .heartRate(log.getHeartRate())
+                .restingHeartRate(log.getRestingHeartRate())
+                .stressNeg(log.getStressNeg())
+                .stressHr(log.getStressHr())
+                .stressArousal(log.getStressArousal())
+                .stressInstab(log.getStressInstab())
+                .hrMode(log.getHrMode())
+                .faceMethod(log.getFaceMethod())
+                .modelEmotion(log.getModelEmotion())
+                .logType(log.getLogType())
                 .build();
     }
 }
