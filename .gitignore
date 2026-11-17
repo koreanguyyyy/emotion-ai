@@ -1,0 +1,25 @@
+# 비밀·설정
+.env
+.env.*
+!.env.example
+
+# 실행 기록·개인 데이터
+logs/
+*.wav
+*.mp3
+.claude/
+
+# 빌드·캐시
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+dist/
+build/
+.gradle/
+.vite/
+.idea/
+.vscode/
+*.wgt
+.DS_Store
