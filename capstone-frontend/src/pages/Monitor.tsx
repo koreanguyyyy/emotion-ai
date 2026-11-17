@@ -5,13 +5,13 @@ import { Progress } from "@/components/ui/progress";
 import ChatBubble from "@/components/chat/ChatBubble";
 import ConversationBubble from "@/components/chat/ConversationBubble";
 import { Button } from "@/components/ui/button";
-import { Loader2, MessageCircle, Send, UserPlus, X, Zap } from "lucide-react";
+import { Camera, CameraOff, Loader2, MessageCircle, Send, UserPlus, X, Zap } from "lucide-react";
 import { getRecentEmotionLogs } from "@/api/emotion";
 import {
   getInterventions,
   submitInterventionFeedback,
 } from "@/api/intervention";
-import { endChat, getLiveState, resetVisitor, sendChatMessage, startChat, triggerIntervention } from "@/api/live";
+import { endChat, getLiveState, LIVE_VIDEO_URL, resetVisitor, sendChatMessage, startChat, triggerIntervention } from "@/api/live";
 import type { EmotionLog, Intervention, InterventionRating, LiveState } from "@/types";
 import { EMOTION_LABELS, HR_MODE_LABELS, logEmotion, logStress, normalizeEmotion } from "@/types";
 import { format } from "date-fns";
@@ -287,11 +287,15 @@ export default function Monitor() {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 gap-4">
-      {/* Status Bar */}
-      <Card>
+    <div className="flex flex-col lg:flex-row h-full min-h-0 gap-4">
+      {/* ── 왼쪽: 상태 (얼굴 인식 + 표정·스트레스·심박) ── */}
+      <div className="lg:w-[44%] shrink-0 flex flex-col gap-4 min-h-0 lg:overflow-y-auto">
+      <FaceCamera connected={liveOk} />
+
+      {/* Status */}
+      <Card className="shrink-0">
         <CardContent className="p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">감지된 표정</p>
               <div className="flex items-center gap-2">
@@ -301,6 +305,11 @@ export default function Monitor() {
                 <span className="font-medium text-sm">
                   {emotion ? EMOTION_LABELS[emotion] : "얼굴 인식 대기"}
                 </span>
+                {useLive && emotion === "neutral" && live.emotionLean && (
+                  <span className="text-xs text-muted-foreground">
+                    · {EMOTION_LABELS[live.emotionLean]} 쪽 {EMOTION_EMOJI[live.emotionLean]}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -360,7 +369,11 @@ export default function Monitor() {
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-4 border-t pt-4">
+          {useLive && live.emotionScores && (
+            <EmotionBars scores={live.emotionScores} active={emotion !== "neutral" ? emotion : live.emotionLean ?? null} />
+          )}
+
+          <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-4">
             {parts.map((p) => (
               <div key={p.label} className="space-y-1">
                 <p className="text-xs text-muted-foreground">
@@ -372,7 +385,7 @@ export default function Monitor() {
                 </div>
               </div>
             ))}
-            <div className="space-y-1 col-span-2 lg:col-span-1">
+            <div className="space-y-1 col-span-2">
               <p className="text-xs text-muted-foreground">최근 발화</p>
               <p className="text-sm truncate font-medium">{speech || "-"}</p>
             </div>
@@ -385,15 +398,17 @@ export default function Monitor() {
         </CardContent>
       </Card>
 
-      {/* Chat Area */}
-      <Card className="flex-1 flex flex-col overflow-hidden">
+      </div>
+
+      {/* ── 오른쪽: 대화 ── */}
+      <Card className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
           <div className="flex items-center gap-2 text-sm">
             <MessageCircle className="h-4 w-4" />
             {chatActive ? (
               <span className="font-medium">
                 대화 중
-                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                <span className="ml-2 text-xs font-normal text-muted-foreground hidden 2xl:inline">
                   말로 대답하거나 아래에 입력하세요
                   {chat?.idleLeftSec != null && !chatBusy && ` · ${chat.idleLeftSec}초 뒤 자동 종료`}
                 </span>
@@ -480,6 +495,98 @@ export default function Monitor() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// 얼굴 인식 화면: 감지 프로그램이 그린 화면(얼굴 박스·심박·지수)을 MJPEG로 받아 그대로 보여 준다.
+function FaceCamera({ connected }: { connected: boolean }) {
+  const [show, setShow] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [nonce, setNonce] = useState(0);
+
+  // 감지 프로그램이 다시 연결되면 영상도 다시 연결
+  useEffect(() => {
+    if (connected) {
+      setFailed(false);
+      setNonce((n) => n + 1);
+    }
+  }, [connected]);
+
+  const ready = connected && show && !failed;
+  return (
+    <Card className="shrink-0 flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Camera className="h-4 w-4" /> 얼굴 인식
+          <span className="text-xs font-normal text-muted-foreground">저장하지 않아요</span>
+        </div>
+        <Button variant="outline" size="sm" className="h-8" onClick={() => { setShow((v) => !v); setFailed(false); setNonce((n) => n + 1); }}>
+          {show ? <><CameraOff className="h-3.5 w-3.5" /> 숨기기</> : <><Camera className="h-3.5 w-3.5" /> 보이기</>}
+        </Button>
+      </div>
+      <div className="aspect-video bg-black flex items-center justify-center">
+        {ready ? (
+          <img
+            key={nonce}
+            src={`${LIVE_VIDEO_URL}?n=${nonce}`}
+            alt="얼굴 인식 화면"
+            className="w-full h-full object-contain"
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <div className="flex flex-col items-center gap-2 p-6 text-center text-sm text-white/70">
+            <CameraOff className="h-8 w-8" />
+            {!show
+              ? "얼굴 인식 화면을 숨겼어요"
+              : !connected
+                ? "감지 프로그램이 연결되면 얼굴 인식 화면이 나타나요"
+                : (
+                  <>
+                    얼굴 인식 화면을 불러오지 못했어요
+                    <Button variant="secondary" size="sm" className="h-7" onClick={() => { setFailed(false); setNonce((n) => n + 1); }}>
+                      다시 연결
+                    </Button>
+                  </>
+                )}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// 표정 점수 막대: 라벨이 '무감정'이어도 어느 감정 쪽으로 얼마나 움직였는지 바로 보이게
+const BAR_KEYS = ["happy", "sad", "angry", "fear", "disgust", "surprise"] as const;
+const BAR_FULL = 0.3;   // 평소보다 이만큼 움직이면 막대가 꽉 참 (라벨 기준 약 0.12~0.15의 2배)
+const BAR_COLOR: Record<string, string> = {
+  happy: "#22c55e", sad: "#3b82f6", angry: "#ef4444", fear: "#a855f7", disgust: "#84cc16", surprise: "#f59e0b",
+};
+
+function EmotionBars({ scores, active }: { scores: Record<string, number>; active: string | null }) {
+  return (
+    <div className="mt-4 border-t pt-4">
+      <p className="mb-2 text-xs text-muted-foreground">표정 점수 <span className="opacity-70">(평소 얼굴 대비 움직임)</span></p>
+      <div className="grid grid-cols-3 gap-x-4 gap-y-2">
+        {BAR_KEYS.map((k) => {
+          const v = scores[k] ?? 0;
+          const pct = Math.min(100, (v / BAR_FULL) * 100);
+          const on = k === active;
+          return (
+            <div key={k} className="space-y-1">
+              <div className={`flex items-center gap-1 text-xs ${on ? "font-semibold" : "text-muted-foreground"}`}>
+                <span>{EMOTION_EMOJI[k]}</span>{EMOTION_LABELS[k]}
+              </div>
+              <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${pct}%`, backgroundColor: BAR_COLOR[k], opacity: on ? 1 : 0.55 }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

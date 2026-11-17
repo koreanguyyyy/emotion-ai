@@ -6,6 +6,9 @@ const LIVE_URL = import.meta.env.VITE_LIVE_URL || "http://127.0.0.1:8765/state";
 
 const LIVE_BASE = LIVE_URL.replace(/\/state\/?$/, "");
 
+// 얼굴 인식 화면(MJPEG): <img src={LIVE_VIDEO_URL}>로 바로 표시. 감지 프로그램이 이 컴퓨터에서만 보내며 저장하지 않는다.
+export const LIVE_VIDEO_URL = `${LIVE_BASE}/video`;
+
 async function post(path: string, body: object = {}): Promise<{ ok: boolean; reason?: string }> {
   const res = await fetch(`${LIVE_BASE}${path}`, {
     method: "POST",

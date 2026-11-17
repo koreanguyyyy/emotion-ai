@@ -89,6 +89,8 @@ export interface LiveState {
   faceDetected: boolean;
   faceEmotion: string;
   emotionKey: string;
+  emotionScores?: Record<string, number> | null;   // 감정별 점수(평소 대비) — 표정 막대
+  emotionLean?: string | null;                     // 무감정이어도 기울어진 감정 (영문 키)
   faceConfidence: number | null;
   faceBaselineReady: boolean;
   faceMethod: string | null;
