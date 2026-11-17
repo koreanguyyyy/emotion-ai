@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+chroma_db/
+*.bin
+.DS_Store
+
+# 2026-11-04: 실험용 설정 백업(키 포함)과 대화·기억 기록은 올리지 않는다
+.env.lab
+logs/
