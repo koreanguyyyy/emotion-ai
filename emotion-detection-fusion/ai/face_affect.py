@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import os
 import statistics
 from dataclasses import dataclass
 
@@ -30,7 +31,14 @@ from ai.emotion_label import MIN_SCORE, NEUTRAL_LABEL, emotion_scores
 VALENCE_SCALE = 0.5   # 감정 점수 차이 0.5 → 정서가 ±1 (예: 눈썹 안쪽 +0.5 → 슬픔 0.2 → 정서가 −0.4)
 AROUSAL_SCALE = 0.3
 CONF_REF = 0.35       # 평소보다 0.35 이상 움직이면 '뚜렷한 표정' (2학기와 같은 기준점)
-LABEL_MIN = 0.15      # 기준선 대비 감정 점수가 이 이상이면 라벨 표시. 정서가 ±0.3과 맞춘 값
+def _label_min() -> float:
+    try:
+        return float((os.getenv("FACE_LABEL_MIN") or "0.15").split("#")[0])
+    except ValueError:
+        return 0.15
+
+
+LABEL_MIN = _label_min()   # 기준선 대비 감정 점수가 이 이상이면 라벨 표시(기본 0.15). .env FACE_LABEL_MIN으로 조절 — 낮을수록 작은 표정도 잡음
                       # (2학기 원래 값 0.2는 원값 기준이라, 정서가 −0.4인데 라벨은 무감정인 경우가 생겼다)
 
 AROUSAL_POS = {
@@ -57,6 +65,7 @@ class FaceAffect:
     confidence: float   # 0~1
     label: str          # 한국어 감정 라벨
     top_delta: str      # 진단용: 평소보다 가장 많이 올라간 블렌드셰입 3개
+    scores: dict | None = None   # 감정별 점수(평소 대비, 0 이상) — 웹 화면의 감정 막대용
 
 
 class FaceBaseline:
@@ -120,4 +129,5 @@ def face_affect(bs: dict, baseline: FaceBaseline | None = None, detected: bool =
     label = best if sc[best] >= threshold else NEUTRAL_LABEL
 
     top = sorted(((k, v) for k, v in d.items() if k != "_neutral"), key=lambda kv: kv[1], reverse=True)[:3]
-    return FaceAffect(valence, arousal, confidence, label, " ".join(f"{k}:{v:.2f}" for k, v in top))
+    return FaceAffect(valence, arousal, confidence, label, " ".join(f"{k}:{v:.2f}" for k, v in top),
+                      {k: max(0.0, float(v)) for k, v in sc.items()})

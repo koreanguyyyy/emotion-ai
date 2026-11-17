@@ -19,6 +19,7 @@ import time
 import cv2
 from dotenv import load_dotenv
 
+from ai.frame_store import FRAMES
 from ai.emotion_label import EN_LABEL
 from ai.face_affect import FaceBaseline, face_affect
 from ai.stress_index import BaselineHR, StressIndexer, is_octave_jump
@@ -148,6 +149,7 @@ def run_face_fusion(indexer: StressIndexer) -> None:
         print(f"[Face] 심박 출처: {HR_SOURCE} (워치 앱이 보내는 심박{'을 우선 사용' if HR_SOURCE == 'auto' else '만 사용'})")
     last_mode = None
 
+    score_ema: dict = {}
     try:
         while not stop_event.is_set():
             if visitor_reset.is_set():   # 새 관람객: 기준선·심박·지수 기록을 처음부터
@@ -162,6 +164,7 @@ def run_face_fusion(indexer: StressIndexer) -> None:
                 cam_bpm, cam_t, last_valid_t = None, -1e9, -1e9
                 octave_rejects, last_mode, hr_source_used = 0, None, None
                 indexer.clear()
+                score_ema = {}
                 print(f"[Face] 새 관람객 — 무표정 {FACE_BASELINE_SEC:.0f}초 · 평상시 심박 {BASELINE_SEC:.0f}초 다시 보정합니다")
             ok, frame = cap.read()
             if not ok:
@@ -211,6 +214,10 @@ def run_face_fusion(indexer: StressIndexer) -> None:
                 if face_base.ready and not was_ready:
                     print("[Face] 무표정 기준선 보정 완료 — 이제 평소 대비 표정 변화로 읽습니다")
             fa = face_affect(reading.blendshapes, face_base, reading.detected)
+            if fa.scores:   # 감정 막대: 프레임마다 떨리지 않게 살짝 부드럽게 (웹은 1초마다 읽음)
+                score_ema = {k: 0.7 * score_ema.get(k, v) + 0.3 * v for k, v in fa.scores.items()}
+            elif not reading.detected:
+                score_ema = {}
             rule_label, rule_valence = fa.label, fa.valence * fa.confidence
             ma = None
             if face_model is not None:
@@ -242,6 +249,7 @@ def run_face_fusion(indexer: StressIndexer) -> None:
 
             update_state(
                 face_detected=reading.detected, face_emotion=label, face_confidence=conf,
+                face_scores=dict(score_ema) if score_ema else None,
                 fused_valence=fused.valence, fused_arousal=fused.arousal,
                 face_weight=fused.face_weight, hr_bpm=hr_now, hr_quality=hr_q,
                 resting_hr=baseline.value, hr_mode=mode, hr_raw_bpm=hr_raw,
@@ -310,6 +318,7 @@ def run_face_fusion(indexer: StressIndexer) -> None:
             if state.get("last_intervention_id"):
                 _put(frame, "l:LIKED  d:DISLIKED  s:SKIPPED  i:talk now  n:new visitor", 5, (255, 255, 0))
 
+            FRAMES.publish(frame)   # 웹페이지 '얼굴 인식' 화면 (보는 사람이 있을 때만)
             cv2.imshow("Emotion Agent - fusion", frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):

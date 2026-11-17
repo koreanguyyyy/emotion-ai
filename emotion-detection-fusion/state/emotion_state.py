@@ -27,6 +27,7 @@ def request_visitor_reset() -> None:
 emotion_state = {
     # ── 1학기와 같은 항목 ──
     "face_emotion": None,           # 한국어 감정 라벨 (에이전트 서버의 Tool 선택용)
+    "face_scores": None,            # 감정별 점수(부드럽게 한 값) — 웹 화면의 감정 막대용
     "stt_text": None,               # 최신 STT 텍스트
     "stress_level": None,           # 에이전트가 최종 판단한 스트레스 (0~10)
     "last_intervention_id": None,   # 최근 개입 ID (피드백 제출용)

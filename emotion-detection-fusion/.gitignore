@@ -16,3 +16,7 @@ temp_video/
 logs/
 .vscode/
 audio/*.wav
+
+# 설정 파일(키 포함) — 커밋 금지
+.env.*
+!.env.example

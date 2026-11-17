@@ -10,9 +10,11 @@
   POST http://127.0.0.1:8765/chat        {"message": "..."} → 웹 채팅으로 대답 (답은 /state의 chat에 나타남)
   POST http://127.0.0.1:8765/chat/start  → 개입 없이 대화 시작
   POST http://127.0.0.1:8765/chat/end    → 대화 끝내기
-  .env: LIVE_PORT=8765 (0이면 끔)
+  GET  http://127.0.0.1:8765/video       → 얼굴 인식 화면(MJPEG, <img src>로 바로 표시)
+  .env: LIVE_PORT=8765 (0이면 끔), LIVE_VIDEO=on|off (얼굴 인식 화면)
 
-보안: 이 컴퓨터 안(127.0.0.1)에서만 열린다. 영상·음성은 보내지 않고 계산된 숫자만 보낸다.
+보안: 이 컴퓨터 안(127.0.0.1)에서만 열린다. 얼굴 인식 화면은 웹페이지가 볼 때만 만들고 저장하지 않는다.
+음성은 보내지 않는다.
 """
 from __future__ import annotations
 
@@ -20,6 +22,8 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from ai.frame_store import FRAMES
 
 EMOTION_KEY = {"행복": "happy", "슬픔": "sad", "분노": "angry", "공포": "fear",
                "혐오": "disgust", "놀람": "surprise", "무감정": "neutral"}
@@ -35,6 +39,22 @@ def _num(v, nd=3):
         return None
 
 
+LEAN_MIN = 0.05   # 무감정이어도 이 이상이면 '어느 쪽으로 기울었는지' 보여 준다
+
+
+def _scores(sc) -> dict | None:
+    if not sc:
+        return None
+    return {EMOTION_KEY[k]: round(float(v), 3) for k, v in sc.items() if k in EMOTION_KEY}
+
+
+def _lean(sc) -> str | None:
+    if not sc:
+        return None
+    k = max(sc, key=lambda x: sc[x])
+    return EMOTION_KEY.get(k) if sc[k] >= LEAN_MIN else None
+
+
 def build_live_payload(state: dict, reading, chat: dict | None = None) -> dict:
     """세션 상태와 최근 스트레스 계산 결과(+ 대화 상태)를 웹페이지용 JSON으로 만든다."""
     label = state.get("face_emotion") or "무감정"
@@ -43,6 +63,8 @@ def build_live_payload(state: dict, reading, chat: dict | None = None) -> dict:
         "time": time.time(),
         "faceDetected": bool(state.get("face_detected")),
         "faceEmotion": label,
+        "emotionScores": _scores(state.get("face_scores")),
+        "emotionLean": _lean(state.get("face_scores")),
         "emotionKey": EMOTION_KEY.get(label, "neutral"),
         "faceConfidence": _num(state.get("face_confidence")),
         "faceBaselineReady": bool(state.get("face_baseline_ready")),
@@ -71,7 +93,8 @@ def build_live_payload(state: dict, reading, chat: dict | None = None) -> dict:
 MAX_POST_BYTES = 8 * 1024
 
 
-def start_live_server(port: int, get_payload, post_handlers: dict | None = None) -> ThreadingHTTPServer | None:
+def start_live_server(port: int, get_payload, post_handlers: dict | None = None,
+                      frames=None) -> ThreadingHTTPServer | None:
     """get_payload(): 호출할 때마다 최신 상태 dict를 돌려주는 함수.
     post_handlers: {경로: 함수(body dict) → dict} — 웹 채팅 등. 실패하면 경고만 하고 None."""
     post_handlers = post_handlers or {}
@@ -93,7 +116,38 @@ def start_live_server(port: int, get_payload, post_handlers: dict | None = None)
         def do_OPTIONS(self):  # noqa: N802
             self._send(204)
 
+        def _stream_video(self) -> None:
+            """얼굴 인식 화면을 연속 JPEG(MJPEG)로 보낸다. 웹페이지가 닫히면 끝난다."""
+            frames = self.server.frames
+            if not frames.enabled:
+                self._send(404, b'{"error":"video off"}')
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            frames.add_viewer()
+            seq = 0
+            try:
+                while not getattr(self.server, "_closing", False):
+                    got = frames.wait_next(seq, timeout=2.0)
+                    if got is None:
+                        continue
+                    seq, jpg = got
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                     + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                pass   # 웹페이지를 닫거나 새로고침함
+            finally:
+                frames.remove_viewer()
+
         def do_GET(self):  # noqa: N802
+            if self.path.split("?")[0] == "/video":
+                self._stream_video()
+                return
             if self.path.split("?")[0] != "/state":
                 self._send(404, b'{"error":"not found"}')
                 return
@@ -129,9 +183,12 @@ def start_live_server(port: int, get_payload, post_handlers: dict | None = None)
 
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        server.daemon_threads = True          # 영상 보는 중이어도 프로그램이 바로 꺼지게
+        server.frames = frames or FRAMES
     except OSError as e:
         print(f"[Live] 실시간 상태 통로를 열지 못했습니다 (포트 {port}): {e}")
         return None
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"[Live] 실시간 상태: http://127.0.0.1:{port}/state")
+    print(f"[Live] 실시간 상태: http://127.0.0.1:{port}/state"
+          + (f"  ·  얼굴 인식 화면: http://127.0.0.1:{port}/video" if server.frames.enabled else ""))
     return server
